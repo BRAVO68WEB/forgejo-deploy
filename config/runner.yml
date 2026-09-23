@@ -1,7 +1,8 @@
-# Forgejo Runner 13. Jobs with `runs-on: docker` use the label below.
-# The daemon talks to the DinD service over TLS. Job containers receive the
-# client certs so `docker build` / `docker push` work inside a workflow.
-# Do not set docker_host to automount. That would bind the host socket.
+# Forgejo Runner 13. Jobs with `runs-on: docker` run on the DinD service.
+# `network: host` is the DinD container's network namespace, so jobs reach
+# dockerd at tcp://docker:2376. The bridge network cannot resolve that name.
+# `docker_host: "-"` keeps the runner on DOCKER_HOST from Compose and does
+# not mount a socket. Job certs come from the dind-certs volume.
 
 log:
   level: info
@@ -26,11 +27,11 @@ cache:
   dir: /data/.cache
 
 container:
-  network: bridge
-  privileged: false
+  network: host
+  privileged: true
   options: "-v /certs/client:/certs/client:ro"
   valid_volumes:
     - /certs/client
-  docker_host: "tcp://docker:2376"
+  docker_host: "-"
   force_pull: false
   force_rebuild: false
