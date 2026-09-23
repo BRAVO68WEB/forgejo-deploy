@@ -121,7 +121,9 @@ rule. DinD is privileged, so treat workflow code as trusted.
 The login button appears only after `bootstrap` creates the `oidc`
 authentication source. The first login for a person in `forgejo-users`
 creates their account. A person outside that group is rejected.
-`forgejo-admins` becomes a Forgejo admin.
+`forgejo-admins` becomes a Forgejo admin. The account name comes from the
+`preferred_username` claim. Forgejo 15 selects that claim with the
+`nickname` setting.
 
 The local password form stays available for `BOOTSTRAP_ADMIN_USER`. After
 an OIDC admin has signed in, you can set

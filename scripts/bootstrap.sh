@@ -70,12 +70,11 @@ else
   echo "bootstrap: added OIDC source oidc"
 fi
 
-# --keep-labels preserves labels on later deploys. The first call still
-# needs --labels, and passing both is accepted.
+# Passing --labels again sets the same label. --keep-labels cannot be
+# combined with --labels, and omitting --labels clears them.
 "$FORGEJO" forgejo-cli actions register \
   --config "$CONFIG" \
   --secret "$RUNNER_SECRET" \
   --name ci \
-  --labels docker \
-  --keep-labels
+  --labels docker
 echo "bootstrap: runner ci registered"

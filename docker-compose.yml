@@ -133,7 +133,9 @@ services:
       FORGEJO__oauth2__JWT_SECRET: ${OAUTH2_JWT_SECRET:?OAUTH2_JWT_SECRET is required}
       FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION: "true"
       FORGEJO__oauth2_client__ACCOUNT_LINKING: disabled
-      FORGEJO__oauth2_client__USERNAME: preferred_username
+      # nickname reads the preferred_username claim for OpenID Connect.
+      # Forgejo 15 rejects the literal value preferred_username.
+      FORGEJO__oauth2_client__USERNAME: nickname
       FORGEJO__oauth2_client__UPDATE_AVATAR: "true"
       FORGEJO__oauth2_client__REGISTER_EMAIL_CONFIRM: "false"
       FORGEJO__repository__DEFAULT_PRIVATE: private
