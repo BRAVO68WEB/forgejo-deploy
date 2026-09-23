@@ -17,8 +17,11 @@ runner:
   fetch_interval: 2s
   labels:
     - "docker:docker://code.forgejo.org/oci/node:22-bookworm"
+  # Jobs share the DinD network namespace (container.network=host).
+  # localhost matches the DinD TLS certificate. The name docker does not
+  # resolve inside a job: that lookup goes to public DNS.
   envs:
-    DOCKER_HOST: tcp://docker:2376
+    DOCKER_HOST: tcp://localhost:2376
     DOCKER_TLS_VERIFY: "1"
     DOCKER_CERT_PATH: /certs/client
 
