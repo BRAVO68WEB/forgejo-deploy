@@ -224,7 +224,9 @@ services:
       - dind-certs:/certs
     networks:
       - ci
-    mem_limit: 2g
+    # The Coder site build runs inside this daemon. Vite needs several
+    # gigabytes; 2g gets the compiler killed (exit 137).
+    mem_limit: 8g
     logging: *default-logging
 
   runner-init:
