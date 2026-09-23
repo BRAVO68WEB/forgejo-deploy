@@ -1,0 +1,36 @@
+# Forgejo Runner 13. Jobs with `runs-on: docker` use the label below.
+# The daemon talks to the DinD service over TLS. Job containers receive the
+# client certs so `docker build` / `docker push` work inside a workflow.
+# Do not set docker_host to automount. That would bind the host socket.
+
+log:
+  level: info
+
+runner:
+  file: /data/.runner
+  capacity: 1
+  timeout: 3h
+  shutdown_timeout: 0s
+  insecure: false
+  fetch_timeout: 5s
+  fetch_interval: 2s
+  labels:
+    - "docker:docker://code.forgejo.org/oci/node:22-bookworm"
+  envs:
+    DOCKER_HOST: tcp://docker:2376
+    DOCKER_TLS_VERIFY: "1"
+    DOCKER_CERT_PATH: /certs/client
+
+cache:
+  enabled: true
+  dir: /data/.cache
+
+container:
+  network: bridge
+  privileged: false
+  options: "-v /certs/client:/certs/client:ro"
+  valid_volumes:
+    - /certs/client
+  docker_host: "tcp://docker:2376"
+  force_pull: false
+  force_rebuild: false

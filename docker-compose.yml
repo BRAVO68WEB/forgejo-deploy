@@ -1,0 +1,296 @@
+# Forgejo 15 LTS on Dokploy.
+# Deploy this repository as a Compose application. Relative files under
+# ./config and ./scripts are read at deploy time from the git checkout.
+# Secrets live in Dokploy's Environment tab, which writes .env beside this file.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 1g
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  redis:
+    image: valkey/valkey:8-alpine
+    restart: unless-stopped
+    command:
+      - valkey-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      - --appendonly
+      - "yes"
+      - --maxmemory
+      - 192mb
+      - --maxmemory-policy
+      - noeviction
+      - --save
+      - ""
+    volumes:
+      - redis-data:/data
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${REDIS_PASSWORD}", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  server:
+    image: codeberg.org/forgejo/forgejo:15-rootless
+    restart: unless-stopped
+    user: "1000:1000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment: &forgejo-env
+      USER_UID: "1000"
+      USER_GID: "1000"
+      FORGEJO____APP_NAME: ${APP_NAME:-Git}
+      FORGEJO__server__PROTOCOL: http
+      FORGEJO__server__DOMAIN: ${GIT_DOMAIN:?GIT_DOMAIN is required}
+      FORGEJO__server__ROOT_URL: https://${GIT_DOMAIN}/
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__LOCAL_ROOT_URL: http://server:3000/
+      FORGEJO__server__SSH_DOMAIN: ${SSH_DOMAIN:?SSH_DOMAIN is required}
+      FORGEJO__server__SSH_PORT: "22"
+      FORGEJO__server__SSH_LISTEN_PORT: "2222"
+      FORGEJO__server__START_SSH_SERVER: "true"
+      FORGEJO__server__LFS_START_SERVER: "true"
+      FORGEJO__server__LFS_JWT_SECRET: ${LFS_JWT_SECRET:?LFS_JWT_SECRET is required}
+      FORGEJO__server__LANDING_PAGE: login
+      FORGEJO__server__OFFLINE_MODE: "true"
+      FORGEJO__database__DB_TYPE: postgres
+      FORGEJO__database__HOST: postgres:5432
+      FORGEJO__database__NAME: ${POSTGRES_DB}
+      FORGEJO__database__USER: ${POSTGRES_USER}
+      FORGEJO__database__PASSWD: ${POSTGRES_PASSWORD}
+      FORGEJO__database__SSL_MODE: disable
+      FORGEJO__database__MAX_OPEN_CONNS: "20"
+      FORGEJO__database__MAX_IDLE_CONNS: "10"
+      FORGEJO__cache__ADAPTER: redis
+      FORGEJO__cache__HOST: "redis://:${REDIS_PASSWORD}@redis:6379/0?pool_size=100&idle_timeout=180s"
+      FORGEJO__session__PROVIDER: redis
+      FORGEJO__session__PROVIDER_CONFIG: "redis://:${REDIS_PASSWORD}@redis:6379/1?pool_size=100&idle_timeout=180s"
+      FORGEJO__session__SAME_SITE: lax
+      FORGEJO__queue__TYPE: redis
+      FORGEJO__queue__CONN_STR: "redis://:${REDIS_PASSWORD}@redis:6379/2"
+      FORGEJO__storage__STORAGE_TYPE: minio
+      FORGEJO__storage__MINIO_ENDPOINT: ${S3_ENDPOINT:?S3_ENDPOINT is required}
+      FORGEJO__storage__MINIO_ACCESS_KEY_ID: ${S3_ACCESS_KEY:?S3_ACCESS_KEY is required}
+      FORGEJO__storage__MINIO_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:?S3_SECRET_KEY is required}
+      FORGEJO__storage__MINIO_BUCKET: ${S3_BUCKET:?S3_BUCKET is required}
+      FORGEJO__storage__MINIO_LOCATION: ${S3_LOCATION:-us-east-1}
+      FORGEJO__storage__MINIO_USE_SSL: "true"
+      FORGEJO__storage__MINIO_BUCKET_LOOKUP: auto
+      FORGEJO__storage__MINIO_CHECKSUM_ALGORITHM: ${S3_CHECKSUM_ALGORITHM:-default}
+      FORGEJO__storage__SERVE_DIRECT: "false"
+      FORGEJO__mailer__ENABLED: "true"
+      FORGEJO__mailer__PROTOCOL: ${MAIL_PROTOCOL:-smtp+starttls}
+      FORGEJO__mailer__SMTP_ADDR: ${MAIL_SMTP_ADDR:?MAIL_SMTP_ADDR is required}
+      FORGEJO__mailer__SMTP_PORT: ${MAIL_SMTP_PORT:-587}
+      FORGEJO__mailer__USER: ${MAIL_USER:?MAIL_USER is required}
+      FORGEJO__mailer__PASSWD: ${MAIL_PASSWORD:?MAIL_PASSWORD is required}
+      FORGEJO__mailer__FROM: ${MAIL_FROM:?MAIL_FROM is required}
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "true"
+      FORGEJO__service__ENABLE_NOTIFY_MAIL: "true"
+      FORGEJO__service__ENABLE_INTERNAL_SIGNIN: "true"
+      FORGEJO__service__REGISTER_EMAIL_CONFIRM: "false"
+      FORGEJO__service__DEFAULT_KEEP_EMAIL_PRIVATE: "true"
+      FORGEJO__service__DEFAULT_ALLOW_CREATE_ORGANIZATION: "false"
+      FORGEJO__service__ENABLE_BASIC_AUTHENTICATION: "true"
+      FORGEJO__openid__ENABLE_OPENID_SIGNIN: "false"
+      FORGEJO__openid__ENABLE_OPENID_SIGNUP: "false"
+      FORGEJO__oauth2__JWT_SECRET: ${OAUTH2_JWT_SECRET:?OAUTH2_JWT_SECRET is required}
+      FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION: "true"
+      FORGEJO__oauth2_client__ACCOUNT_LINKING: disabled
+      FORGEJO__oauth2_client__USERNAME: preferred_username
+      FORGEJO__oauth2_client__UPDATE_AVATAR: "true"
+      FORGEJO__oauth2_client__REGISTER_EMAIL_CONFIRM: "false"
+      FORGEJO__repository__DEFAULT_PRIVATE: private
+      FORGEJO__repository__DEFAULT_BRANCH: main
+      FORGEJO__packages__ENABLED: "true"
+      FORGEJO__actions__ENABLED: "true"
+      FORGEJO__actions__DEFAULT_ACTIONS_URL: https://data.forgejo.org
+      FORGEJO__actions__LOG_RETENTION_DAYS: "30"
+      FORGEJO__actions__ARTIFACT_RETENTION_DAYS: "14"
+      FORGEJO__indexer__ISSUE_INDEXER_TYPE: db
+      FORGEJO__indexer__REPO_INDEXER_ENABLED: "true"
+      FORGEJO__indexer__REPO_INDEXER_TYPE: bleve
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__security__SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
+      FORGEJO__security__INTERNAL_TOKEN: ${INTERNAL_TOKEN:?INTERNAL_TOKEN is required}
+      FORGEJO__security__PASSWORD_HASH_ALGO: pbkdf2
+      FORGEJO__security__MIN_PASSWORD_LENGTH: "15"
+      FORGEJO__security__REVERSE_PROXY_LIMIT: "1"
+      FORGEJO__security__REVERSE_PROXY_TRUSTED_PROXIES: ${TRUSTED_PROXIES:?TRUSTED_PROXIES is required}
+      FORGEJO__security__DISABLE_QUERY_AUTH_TOKEN: "true"
+      FORGEJO__log__MODE: console
+      FORGEJO__log__LEVEL: Info
+    volumes:
+      - forgejo-data:/var/lib/gitea
+    ports:
+      # Dokploy reads this for the Domains tab. ufw-docker keeps the random
+      # host port off the public internet. SSH is the only fixed publish.
+      - "3000"
+      - "22:2222"
+    networks:
+      - data
+      - ci
+      - dokploy-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3000/api/healthz | grep -Eq '\"status\": ?\"pass\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    mem_limit: 1g
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  bootstrap:
+    image: codeberg.org/forgejo/forgejo:15-rootless
+    restart: "no"
+    user: "1000:1000"
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      <<: *forgejo-env
+      BOOTSTRAP_ADMIN_USER: ${BOOTSTRAP_ADMIN_USER:?BOOTSTRAP_ADMIN_USER is required}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?BOOTSTRAP_ADMIN_PASSWORD is required}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?BOOTSTRAP_ADMIN_EMAIL is required}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?OIDC_CLIENT_ID is required}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:?OIDC_CLIENT_SECRET is required}
+      OIDC_DISCOVERY_URL: ${OIDC_DISCOVERY_URL:?OIDC_DISCOVERY_URL is required}
+      OIDC_GROUPS_SCOPE: ${OIDC_GROUPS_SCOPE:-groups}
+      OIDC_REQUIRED_CLAIM: ${OIDC_REQUIRED_CLAIM:?OIDC_REQUIRED_CLAIM is required}
+      OIDC_REQUIRED_VALUE: ${OIDC_REQUIRED_VALUE:?OIDC_REQUIRED_VALUE is required}
+      OIDC_ADMIN_GROUP: ${OIDC_ADMIN_GROUP:?OIDC_ADMIN_GROUP is required}
+      RUNNER_SECRET: ${RUNNER_SECRET:?RUNNER_SECRET is required}
+    volumes:
+      - forgejo-data:/var/lib/gitea
+      - ./scripts/bootstrap.sh:/scripts/bootstrap.sh:ro
+    command: ["/bin/sh", "/scripts/bootstrap.sh"]
+    networks:
+      - data
+      - dokploy-network
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+  docker:
+    image: docker:27-dind
+    hostname: docker
+    restart: unless-stopped
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      - dind-data:/var/lib/docker
+      - dind-certs:/certs
+    networks:
+      - ci
+    mem_limit: 2g
+    logging: *default-logging
+
+  runner-init:
+    image: busybox:1.37
+    restart: "no"
+    user: "0:0"
+    command: ["chown", "-R", "1001:1001", "/data"]
+    volumes:
+      - runner-data:/data
+    networks:
+      - data
+    logging: *default-logging
+
+  runner:
+    image: data.forgejo.org/forgejo/runner:13
+    restart: unless-stopped
+    user: "1001:1001"
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully
+      runner-init:
+        condition: service_completed_successfully
+      docker:
+        condition: service_started
+    environment:
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      FORGEJO_INSTANCE_URL: https://${GIT_DOMAIN}/
+      RUNNER_SECRET: ${RUNNER_SECRET}
+    volumes:
+      - runner-data:/data
+      - dind-certs:/certs:ro
+      - ./config/runner.yml:/etc/runner/runner.yml:ro
+    working_dir: /data
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        until [ -f /certs/client/ca.pem ]; do
+          sleep 1
+        done
+        if [ ! -s /data/.runner ]; then
+          forgejo-runner create-runner-file \
+            --connect \
+            --instance "$$FORGEJO_INSTANCE_URL" \
+            --name ci \
+            --secret "$$RUNNER_SECRET"
+        fi
+        exec forgejo-runner daemon --config /etc/runner/runner.yml
+    networks:
+      - ci
+    mem_limit: 512m
+    security_opt:
+      - no-new-privileges:true
+    logging: *default-logging
+
+networks:
+  data:
+    internal: true
+  ci:
+  dokploy-network:
+    external: true
+
+volumes:
+  forgejo-data:
+  postgres-data:
+  redis-data:
+  runner-data:
+  dind-data:
+  dind-certs:
