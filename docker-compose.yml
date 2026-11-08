@@ -181,7 +181,7 @@ services:
     logging: *default-logging
 
   bootstrap:
-    image: codeberg.org/forgejo/forgejo:15-rootless
+    image: codeberg.org/forgejo/forgejo:17.0.1-rootless
     restart: "no"
     user: "1000:1000"
     depends_on:
@@ -241,7 +241,7 @@ services:
     logging: *default-logging
 
   runner:
-    image: data.forgejo.org/forgejo/runner:13
+    image: data.forgejo.org/forgejo/runner:13.2.1
     restart: unless-stopped
     user: "1001:1001"
     depends_on:
